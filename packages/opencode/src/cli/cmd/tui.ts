@@ -90,7 +90,8 @@ export const TuiThreadCommand = cmd({
       .option("session", {
         alias: ["s"],
         type: "string",
-        describe: "session id to continue",
+        requiresArg: false,
+        describe: "session id to continue (use -s without an id to open the session picker)",
       })
       .option("fork", {
         type: "boolean",
@@ -108,8 +109,15 @@ export const TuiThreadCommand = cmd({
     const unguard = win32InstallCtrlCGuard()
     try {
       const { TuiConfig } = await import("@/config/tui")
+      const sessionID = typeof args.session === "string" ? args.session : undefined
+      const sessionPicker = args.session === true
       if (args.fork && !args.continue && !args.session) {
         UI.error("--fork requires --continue or --session")
+        process.exitCode = 1
+        return
+      }
+      if (args.fork && sessionPicker) {
+        UI.error("--fork requires --session <id> when used with --session")
         process.exitCode = 1
         return
       }
@@ -169,7 +177,7 @@ export const TuiThreadCommand = cmd({
       try {
         await validateSession({
           url: transport.url,
-          sessionID: args.session,
+          sessionID,
           directory: cwd,
           fetch: transport.fetch,
         })
@@ -202,7 +210,8 @@ export const TuiThreadCommand = cmd({
             events: transport.events,
             args: {
               continue: args.continue,
-              sessionID: args.session,
+              sessionID,
+              sessionPicker,
               agent: args.agent,
               model: args.model,
               prompt,
