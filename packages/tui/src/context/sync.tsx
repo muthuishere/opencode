@@ -431,7 +431,7 @@ export const {
       const projectPromise = project.sync()
       const sessionListPromise = projectPromise.then(() => listSessions())
 
-      // blocking - include session.list when continuing a session
+      // blocking - include session.list when continuing or opening the session picker
       const providersPromise = sdk.client.config.providers({ workspace }, { throwOnError: true })
       const providerListPromise = sdk.client.provider.list({ workspace }, { throwOnError: true })
       const consoleStatePromise = sdk.client.experimental.console
@@ -446,7 +446,7 @@ export const {
         agentsPromise,
         configPromise,
         projectPromise,
-        ...(args.continue ? [sessionListPromise] : []),
+        ...(args.continue || args.sessionPicker ? [sessionListPromise] : []),
       ])
         .then(async () => {
           const providersResponse = providersPromise.then((x) => x.data!)
@@ -454,7 +454,7 @@ export const {
           const consoleStateResponse = consoleStatePromise
           const agentsResponse = agentsPromise.then((x) => x.data ?? [])
           const configResponse = configPromise.then((x) => x.data!)
-          const sessionListResponse = args.continue ? sessionListPromise : undefined
+          const sessionListResponse = args.continue || args.sessionPicker ? sessionListPromise : undefined
 
           return Promise.all([
             providersResponse,
@@ -486,7 +486,9 @@ export const {
           if (store.status !== "complete") setStore("status", "partial")
           // non-blocking
           void Promise.all([
-            ...(args.continue ? [] : [sessionListPromise.then((sessions) => setStore("session", reconcile(sessions)))]),
+            ...(args.continue || args.sessionPicker
+              ? []
+              : [sessionListPromise.then((sessions) => setStore("session", reconcile(sessions)))]),
             consoleStatePromise.then((consoleState) => setStore("console_state", reconcile(consoleState))),
             sdk.client.command.list({ workspace }).then((x) => setStore("command", reconcile(x.data ?? []))),
             sdk.client.lsp.status({ workspace }).then((x) => setStore("lsp", reconcile(x.data ?? []))),

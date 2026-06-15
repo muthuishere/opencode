@@ -487,7 +487,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   let continued = false
   createEffect(() => {
     // When using -c, session list is loaded in blocking phase, so we can navigate at "partial"
-    if (continued || sync.status === "loading" || !args.continue) return
+    if (continued || sync.status === "loading" || !args.continue || args.sessionPicker) return
     const match = sync.data.session
       .toSorted((a, b) => b.time.updated - a.time.updated)
       .find((x) => x.parentID === undefined)?.id
@@ -505,6 +505,13 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         route.navigate({ type: "session", sessionID: match })
       }
     }
+  })
+
+  let openedSessionPicker = false
+  createEffect(() => {
+    if (openedSessionPicker || sync.status === "loading" || !args.sessionPicker) return
+    openedSessionPicker = true
+    dialog.replace(() => <DialogSessionList />)
   })
 
   // Handle --session with --fork: wait for sync to be fully complete before forking
