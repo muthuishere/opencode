@@ -228,6 +228,12 @@ export const RunCommand = effectCmd({
         describe: "run in direct interactive split-footer mode",
         default: false,
       })
+      .option("loop", {
+        alias: ["l"],
+        type: "boolean",
+        describe: "after each response read the next prompt from stdin and continue the session (like claude --loop)",
+        default: false,
+      })
       .option("dangerously-skip-permissions", {
         type: "boolean",
         describe: "auto-approve permissions that are not explicitly denied (dangerous!)",
@@ -348,11 +354,12 @@ export const RunCommand = effectCmd({
         }
       }
 
-      const piped = process.stdin.isTTY ? undefined : await Bun.stdin.text()
+      // In loop mode keep stdin available for readline; otherwise read piped stdin up-front.
+      const piped = !args.loop && !process.stdin.isTTY ? await Bun.stdin.text() : undefined
       message = resolveRunInput(message, piped) ?? ""
       const initialInput = resolveRunInput(rawMessage, piped)
 
-      if (message.trim().length === 0 && !args.command && !args.interactive) {
+      if (message.trim().length === 0 && !args.command && !args.interactive && !args.loop) {
         UI.error("You must provide a message or a command")
         process.exit(1)
       }
@@ -761,18 +768,41 @@ export const RunCommand = effectCmd({
         await share(client, sessionID)
 
         if (!args.interactive) {
-          const events = await client.event.subscribe()
-          const completed = loop(client, events).catch((e) => {
-            console.error(e)
-            process.exitCode = 1
-          })
-          async function finish() {
-            if (args.attach) return
-            const error = await completed
-            if (error) process.exitCode = 1
+          // Send one prompt and wait for the session to go idle.  The events
+          // subscription must be fresh for every turn so we recreate it on each
+          // iteration of the loop.
+          async function promptAndWait(text: string, attachedFiles: FilePart[]) {
+            const evts = await client.event.subscribe()
+            const done = loop(client, evts).catch((e) => {
+              console.error(e)
+              process.exitCode = 1
+              return undefined as string | undefined
+            })
+            const result = await client.session.prompt({
+              sessionID,
+              agent,
+              model: pick(args.model),
+              variant: args.variant,
+              parts: [...attachedFiles, { type: "text", text }],
+            })
+            if (result.error) {
+              if (!emit("error", { error: result.error })) UI.error(formatRunError(result.error))
+              process.exitCode = 1
+              return false
+            }
+            if (!args.attach) {
+              const error = await done
+              if (error) process.exitCode = 1
+            }
+            return true
           }
 
           if (args.command) {
+            const evts = await client.event.subscribe()
+            const done = loop(client, evts).catch((e) => {
+              console.error(e)
+              process.exitCode = 1
+            })
             const result = await client.session.command({
               sessionID,
               agent,
@@ -786,24 +816,36 @@ export const RunCommand = effectCmd({
               process.exitCode = 1
               return
             }
-            await finish()
+            if (!args.attach) await done
             return
           }
 
-          const model = pick(args.model)
-          const result = await client.session.prompt({
-            sessionID,
-            agent,
-            model,
-            variant: args.variant,
-            parts: [...files, { type: "text", text: message }],
-          })
-          if (result.error) {
-            if (!emit("error", { error: result.error })) UI.error(formatRunError(result.error))
-            process.exitCode = 1
-            return
+          // Send the initial message when one is provided.
+          if (message.trim()) {
+            const ok = await promptAndWait(message, files)
+            if (!ok || !args.loop) return
           }
-          await finish()
+
+          if (!args.loop) return
+
+          // --loop: keep reading prompts from stdin after each response, just
+          // like `claude --loop` does.  Each line becomes one turn in the same
+          // session.  An empty line or EOF ends the loop.
+          const { createInterface } = await import("readline")
+          const rl = createInterface({
+            input: process.stdin,
+            output: process.stdout,
+            terminal: process.stdout.isTTY,
+            prompt: "> ",
+          })
+          rl.prompt()
+          for await (const line of rl) {
+            if (!line.trim()) break
+            const cont = await promptAndWait(line, [])
+            if (!cont) break
+            rl.prompt()
+          }
+          rl.close()
           return
         }
 
