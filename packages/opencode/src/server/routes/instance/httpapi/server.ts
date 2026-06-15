@@ -33,6 +33,7 @@ import { Instruction } from "@/session/instruction"
 import { LLM } from "@/session/llm"
 import { SessionProcessor } from "@/session/processor"
 import { SessionPrompt } from "@/session/prompt"
+import { SessionPubSub } from "@/session/pubsub"
 import { SessionRevert } from "@/session/revert"
 import { SessionRunState } from "@/session/run-state"
 import { Session } from "@/session/session"
@@ -234,6 +235,7 @@ const app = LayerNode.group([
   SessionRevert.node,
   SessionSummary.node,
   SessionPrompt.node,
+  SessionPubSub.node,
   Instruction.node,
   LLM.node,
   LSP.node,
