@@ -56,6 +56,7 @@ import { useTuiConfig } from "../../config"
 import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
+import { parseLoop } from "./loop"
 
 export type PromptProps = {
   sessionID?: string
@@ -921,6 +922,86 @@ export function Prompt(props: PromptProps) {
     }
   })
 
+  type DispatchParams = {
+    sessionID: string
+    agent: NonNullable<ReturnType<typeof local.agent.current>>
+    selectedModel: NonNullable<ReturnType<typeof local.model.current>>
+    variant: ReturnType<typeof local.model.variant.current>
+    mode: "normal" | "shell"
+    text: string
+    nonTextParts: PromptInfo["parts"]
+    editorParts: { type: "text"; text: string; synthetic: boolean; metadata: Record<string, unknown> }[]
+  }
+
+  // Shared submit path used by both the interactive prompt and the /loop
+  // controller. Routes a body to shell / slash-command / prompt exactly the way
+  // the component always has, so a looped body behaves identically to one typed
+  // by the user.
+  function dispatch(params: DispatchParams) {
+    const { sessionID, agent, selectedModel, variant, mode, text, nonTextParts, editorParts } = params
+    if (mode === "shell") {
+      move.startSubmit()
+      void sdk.client.session.shell({
+        sessionID,
+        agent: agent.name,
+        model: {
+          providerID: selectedModel.providerID,
+          modelID: selectedModel.modelID,
+        },
+        command: text,
+      })
+      return
+    }
+    if (text.startsWith("/") && sync.data.command.some((x) => x.name === text.split("\n")[0].split(" ")[0].slice(1))) {
+      move.startSubmit()
+      // Parse command from first line, preserve multi-line content in arguments
+      const firstLineEnd = text.indexOf("\n")
+      const firstLine = firstLineEnd === -1 ? text : text.slice(0, firstLineEnd)
+      const [command, ...firstLineArgs] = firstLine.split(" ")
+      const restOfInput = firstLineEnd === -1 ? "" : text.slice(firstLineEnd + 1)
+      const args = firstLineArgs.join(" ") + (restOfInput ? "\n" + restOfInput : "")
+
+      void sdk.client.session.command({
+        sessionID,
+        command: command.slice(1),
+        arguments: args,
+        agent: agent.name,
+        model: `${selectedModel.providerID}/${selectedModel.modelID}`,
+        variant,
+        parts: nonTextParts.filter((x) => x.type === "file"),
+      })
+      return
+    }
+    move.startSubmit()
+    sdk.client.session
+      .prompt(
+        {
+          sessionID,
+          ...selectedModel,
+          agent: agent.name,
+          model: selectedModel,
+          variant,
+          parts: [
+            ...editorParts,
+            {
+              type: "text",
+              text,
+            },
+            ...nonTextParts,
+          ],
+        },
+        { throwOnError: true },
+      )
+      .catch((error) => {
+        toast.show({
+          title: "Failed to send prompt",
+          message: errorMessage(error),
+          variant: "error",
+        })
+      })
+    if (editorParts.length > 0) editor.markSelectionSent()
+  }
+
   let submitting = false
   async function submit() {
     // Prevent overlapping invocations (e.g. a double-pressed Enter, or the
@@ -959,6 +1040,64 @@ export function Prompt(props: PromptProps) {
       void exit()
       return true
     }
+
+    // `/loop` is a thin client over the server-side loop engine. We parse it
+    // here (interval/body/stop/status), then call the engine over the SDK —
+    // there are no client-side timers. Detect it before the
+    // slash-command-via-server branch.
+    if (store.mode === "normal" && (trimmed === "/loop" || trimmed.startsWith("/loop ") || trimmed === "/unloop")) {
+      const rest = trimmed === "/unloop" ? "stop" : trimmed.slice("/loop".length)
+      const parsed = parseLoop(rest)
+      // Clear the prompt input the same way a normal submit would.
+      input.extmarks.clear()
+      setStore("prompt", { input: "", parts: [] })
+      setStore("extmarkToPartIndex", new Map())
+      input.clear()
+
+      const sessionID = props.sessionID
+      if (!sessionID) {
+        toast.show({ message: "/loop needs an active session", variant: "warning", duration: 4000 })
+        return true
+      }
+
+      if (parsed.kind === "stop") {
+        const res = await sdk.client.session.loopStop({ sessionID })
+        if (res.error) {
+          toast.show({ message: errorMessage(res.error), variant: "error", duration: 4000 })
+        } else {
+          toast.show({ message: `stopped ${res.data.stopped} loop(s)`, variant: "info", duration: 4000 })
+        }
+      } else if (parsed.kind === "status") {
+        const res = await sdk.client.session.loopList({ sessionID })
+        if (res.error) {
+          toast.show({ message: errorMessage(res.error), variant: "error", duration: 4000 })
+        } else if (!res.data.length) {
+          toast.show({ message: "no active loops", variant: "info", duration: 4000 })
+        } else {
+          const lines = res.data.map((l) => {
+            const cadence = l.mode === "interval" && l.interval ? `every ${l.interval}` : "self-paced"
+            return `${cadence}: "${l.prompt}"`
+          })
+          toast.show({ message: lines.join("\n"), variant: "info", duration: 6000 })
+        }
+      } else {
+        const res = await sdk.client.session.loop({
+          sessionID,
+          prompt: parsed.body,
+          ...(parsed.intervalLabel ? { interval: parsed.intervalLabel } : {}),
+        })
+        if (res.error) {
+          toast.show({ message: errorMessage(res.error), variant: "error", duration: 4000 })
+        } else {
+          const message = parsed.intervalLabel
+            ? `looping every ${parsed.intervalLabel}: "${parsed.body}"`
+            : `looping (self-paced): "${parsed.body}"`
+          toast.show({ message, variant: "info", duration: 4000 })
+        }
+      }
+      return true
+    }
+
     const selectedModel = local.model.current()
     if (!selectedModel) {
       void promptModelWarning()
@@ -1050,69 +1189,17 @@ export function Prompt(props: PromptProps) {
           ]
         : []
 
-    if (store.mode === "shell") {
-      move.startSubmit()
-      void sdk.client.session.shell({
-        sessionID,
-        agent: agent.name,
-        model: {
-          providerID: selectedModel.providerID,
-          modelID: selectedModel.modelID,
-        },
-        command: inputText,
-      })
-      setStore("mode", "normal")
-    } else if (
-      inputText.startsWith("/") &&
-      sync.data.command.some((x) => x.name === inputText.split("\n")[0].split(" ")[0].slice(1))
-    ) {
-      move.startSubmit()
-      // Parse command from first line, preserve multi-line content in arguments
-      const firstLineEnd = inputText.indexOf("\n")
-      const firstLine = firstLineEnd === -1 ? inputText : inputText.slice(0, firstLineEnd)
-      const [command, ...firstLineArgs] = firstLine.split(" ")
-      const restOfInput = firstLineEnd === -1 ? "" : inputText.slice(firstLineEnd + 1)
-      const args = firstLineArgs.join(" ") + (restOfInput ? "\n" + restOfInput : "")
-
-      void sdk.client.session.command({
-        sessionID,
-        command: command.slice(1),
-        arguments: args,
-        agent: agent.name,
-        model: `${selectedModel.providerID}/${selectedModel.modelID}`,
-        variant,
-        parts: nonTextParts.filter((x) => x.type === "file"),
-      })
-    } else {
-      move.startSubmit()
-      sdk.client.session
-        .prompt(
-          {
-            sessionID,
-            ...selectedModel,
-            agent: agent.name,
-            model: selectedModel,
-            variant,
-            parts: [
-              ...editorParts,
-              {
-                type: "text",
-                text: inputText,
-              },
-              ...nonTextParts,
-            ],
-          },
-          { throwOnError: true },
-        )
-        .catch((error) => {
-          toast.show({
-            title: "Failed to send prompt",
-            message: errorMessage(error),
-            variant: "error",
-          })
-        })
-      if (editorParts.length > 0) editor.markSelectionSent()
-    }
+    dispatch({
+      sessionID,
+      agent,
+      selectedModel,
+      variant,
+      mode: store.mode,
+      text: inputText,
+      nonTextParts,
+      editorParts,
+    })
+    if (store.mode === "shell") setStore("mode", "normal")
     history.append({
       ...store.prompt,
       mode: currentMode,

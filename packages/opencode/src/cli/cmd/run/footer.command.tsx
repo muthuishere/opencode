@@ -387,6 +387,14 @@ export function RunCommandMenuBody(props: {
         footer: "/new",
         keywords: "new session clear",
       },
+      {
+        action: "slash",
+        category: "Session",
+        name: "loop",
+        display: "Loop a prompt",
+        footer: "/loop [interval] <prompt>",
+        keywords: "loop repeat recurring interval self-paced /loop stop unloop",
+      },
     ]
     const prompt: CommandEntry[] =
       props.commands() === undefined || skills().length > 0

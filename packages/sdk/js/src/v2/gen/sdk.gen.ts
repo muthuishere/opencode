@@ -191,6 +191,12 @@ import type {
   SessionInitResponses,
   SessionListErrors,
   SessionListResponses,
+  SessionLoopErrors,
+  SessionLoopListErrors,
+  SessionLoopListResponses,
+  SessionLoopResponses,
+  SessionLoopStopErrors,
+  SessionLoopStopResponses,
   SessionMessageErrors,
   SessionMessageResponses,
   SessionMessagesErrors,
@@ -4261,6 +4267,120 @@ export class Session2 extends HeyApiClient {
       url: "/session/{sessionID}/unrevert",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * List loops
+   *
+   * List the active loops for a session.
+   */
+  public loopList<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionLoopListResponses, SessionLoopListErrors, ThrowOnError>({
+      url: "/session/{sessionID}/loop",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Start loop
+   *
+   * Start a recurring background-subagent loop for a session. Each iteration re-prompts a persistent background session and notifies the parent.
+   */
+  public loop<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      prompt?: string
+      interval?: string
+      agent?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "prompt" },
+            { in: "body", key: "interval" },
+            { in: "body", key: "agent" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionLoopResponses, SessionLoopErrors, ThrowOnError>({
+      url: "/session/{sessionID}/loop",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Stop loop
+   *
+   * Stop one loop (by loopID) or all loops in a session.
+   */
+  public loopStop<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      loopID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "loopID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionLoopStopResponses, SessionLoopStopErrors, ThrowOnError>({
+      url: "/session/{sessionID}/loop/stop",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 }

@@ -11,6 +11,7 @@
 import * as Locale from "@/util/locale"
 import { MessageID, PartID } from "@/session/schema"
 import { isExitCommand, isNewCommand } from "./prompt.shared"
+import { isLoopCommand, loopCommandBody, parseLoop, type ParsedLoop } from "./loop"
 import type { FooterApi, FooterEvent, FooterQueuedPrompt, RunPrompt } from "./types"
 
 type Trace = {
@@ -29,6 +30,10 @@ export type QueueInput = {
   trace?: Trace
   onSend?: (prompt: RunPrompt) => void
   onNewSession?: () => void | Promise<void>
+  // Handles a parsed `/loop ...` command by calling the server-side loop engine
+  // over the SDK (start / stop / list). `notify` prints one-line feedback into
+  // scrollback. Scheduling + lifecycle are owned by the server engine.
+  onLoop?: (action: ParsedLoop, notify: (text: string) => void) => void | Promise<void>
   run: (prompt: RunPrompt, signal: AbortSignal) => Promise<void>
 }
 
@@ -69,6 +74,16 @@ export async function runPromptQueue(input: QueueInput): Promise<void> {
   const emit = (next: FooterEvent, row: Record<string, unknown>) => {
     input.trace?.write("ui.patch", row)
     input.footer.event(next)
+  }
+
+  // Surface a system line in scrollback (used for /loop feedback).
+  const notify = (text: string) => {
+    input.footer.append({
+      kind: "system",
+      text,
+      phase: "final",
+      source: "system",
+    })
   }
 
   const syncQueue = () => {
@@ -272,6 +287,20 @@ export async function runPromptQueue(input: QueueInput): Promise<void> {
 
     if (prompt.mode !== "shell" && isExitCommand(prompt.text)) {
       input.footer.close()
+      return
+    }
+
+    // `/loop ...` is handled locally (like /new): it is parsed here and dispatched
+    // to the SERVER-SIDE loop engine over the SDK. It never enqueues a turn and
+    // never runs a client-side timer -- the engine owns scheduling + lifecycle.
+    if (prompt.mode !== "shell" && !prompt.command && isLoopCommand(prompt.text)) {
+      const body = loopCommandBody(prompt.text) ?? ""
+      const parsed = parseLoop(body)
+      if (parsed.type === "error") {
+        notify(parsed.message)
+      } else {
+        void input.onLoop?.(parsed, notify)
+      }
       return
     }
 

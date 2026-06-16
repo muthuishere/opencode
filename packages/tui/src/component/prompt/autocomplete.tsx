@@ -437,19 +437,31 @@ export function Autocomplete(props: {
   const commands = createMemo((): AutocompleteOption[] => {
     const results: AutocompleteOption[] = [...slashes()]
 
+    // Replace the input with a slash-command prefix (e.g. "/loop ") and move the cursor to the end.
+    const insertSlashPrefix = (name: string) => {
+      const newText = "/" + name + " "
+      const cursor = props.input().logicalCursor
+      props.input().deleteRange(0, 0, cursor.row, cursor.col)
+      props.input().insertText(newText)
+      props.input().cursorOffset = Bun.stringWidth(newText)
+    }
+
+    // Client-side commands (intercepted in the prompt submit handler, not server/keymap commands).
+    // Added here purely for discoverability + inserting the prefix; execution stays client-side.
+    results.push({
+      display: "/loop",
+      description: "loop a prompt or command on an interval / self-paced — /loop stop to cancel",
+      aliases: ["unloop"],
+      onSelect: () => insertSlashPrefix("loop"),
+    })
+
     for (const serverCommand of sync.data.command) {
       if (serverCommand.source === "skill") continue
       const label = serverCommand.source === "mcp" ? ":mcp" : ""
       results.push({
         display: "/" + serverCommand.name + label,
         description: serverCommand.description,
-        onSelect: () => {
-          const newText = "/" + serverCommand.name + " "
-          const cursor = props.input().logicalCursor
-          props.input().deleteRange(0, 0, cursor.row, cursor.col)
-          props.input().insertText(newText)
-          props.input().cursorOffset = Bun.stringWidth(newText)
-        },
+        onSelect: () => insertSlashPrefix(serverCommand.name),
       })
     }
 

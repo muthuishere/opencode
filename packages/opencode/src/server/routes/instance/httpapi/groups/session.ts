@@ -75,6 +75,31 @@ export const PermissionResponsePayload = Schema.Struct({
   response: PermissionV1.Reply,
 })
 
+export const LoopPayload = Schema.Struct({
+  prompt: Schema.String,
+  interval: Schema.optional(Schema.String),
+  agent: Schema.optional(Schema.String),
+})
+export const LoopResult = Schema.Struct({
+  loopID: Schema.String,
+  bgSessionID: SessionID,
+  mode: Schema.Literals(["interval", "self-paced"]),
+})
+export const LoopStopPayload = Schema.Struct({
+  loopID: Schema.optional(Schema.String),
+})
+export const LoopStopResult = Schema.Struct({
+  stopped: Schema.Int,
+})
+export const LoopInfo = Schema.Struct({
+  loopID: Schema.String,
+  prompt: Schema.String,
+  interval: Schema.optional(Schema.String),
+  mode: Schema.Literals(["interval", "self-paced"]),
+  running: Schema.Boolean,
+  lastRunAt: Schema.optional(Schema.Number),
+})
+
 export const SessionPaths = {
   list: root,
   status: `${root}/status`,
@@ -98,6 +123,9 @@ export const SessionPaths = {
   shell: `${root}/:sessionID/shell`,
   revert: `${root}/:sessionID/revert`,
   unrevert: `${root}/:sessionID/unrevert`,
+  loop: `${root}/:sessionID/loop`,
+  loopStop: `${root}/:sessionID/loop/stop`,
+  loopList: `${root}/:sessionID/loop`,
   permissions: `${root}/:sessionID/permissions/:permissionID`,
   deleteMessage: `${root}/:sessionID/message/:messageID`,
   deletePart: `${root}/:sessionID/message/:messageID/part/:partID`,
@@ -404,6 +432,45 @@ export const SessionApi = HttpApi.make("session")
             summary: "Respond to permission",
             description: "Approve or deny a permission request from the AI assistant.",
             deprecated: true,
+          }),
+        ),
+        HttpApiEndpoint.post("loop", SessionPaths.loop, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: LoopPayload,
+          success: described(LoopResult, "Started loop"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.loop",
+            summary: "Start loop",
+            description:
+              "Start a recurring background-subagent loop for a session. Each iteration re-prompts a persistent background session and notifies the parent.",
+          }),
+        ),
+        HttpApiEndpoint.post("loopStop", SessionPaths.loopStop, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: LoopStopPayload,
+          success: described(LoopStopResult, "Stopped loops"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.loop_stop",
+            summary: "Stop loop",
+            description: "Stop one loop (by loopID) or all loops in a session.",
+          }),
+        ),
+        HttpApiEndpoint.get("loopList", SessionPaths.loopList, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Array(LoopInfo), "Active loops"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.loop_list",
+            summary: "List loops",
+            description: "List the active loops for a session.",
           }),
         ),
         HttpApiEndpoint.delete("deleteMessage", SessionPaths.deleteMessage, {

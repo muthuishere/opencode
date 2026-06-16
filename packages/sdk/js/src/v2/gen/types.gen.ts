@@ -8441,6 +8441,127 @@ export type PermissionRespondResponses = {
 
 export type PermissionRespondResponse = PermissionRespondResponses[keyof PermissionRespondResponses]
 
+export type SessionLoopListData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/loop"
+}
+
+export type SessionLoopListErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionLoopListError = SessionLoopListErrors[keyof SessionLoopListErrors]
+
+export type SessionLoopListResponses = {
+  /**
+   * Active loops
+   */
+  200: Array<{
+    loopID: string
+    prompt: string
+    interval?: string
+    mode: "interval" | "self-paced"
+    running: boolean
+    lastRunAt?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }>
+}
+
+export type SessionLoopListResponse = SessionLoopListResponses[keyof SessionLoopListResponses]
+
+export type SessionLoopData = {
+  body?: {
+    prompt: string
+    interval?: string
+    agent?: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/loop"
+}
+
+export type SessionLoopErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionLoopError = SessionLoopErrors[keyof SessionLoopErrors]
+
+export type SessionLoopResponses = {
+  /**
+   * Started loop
+   */
+  200: {
+    loopID: string
+    bgSessionID: string
+    mode: "interval" | "self-paced"
+  }
+}
+
+export type SessionLoopResponse = SessionLoopResponses[keyof SessionLoopResponses]
+
+export type SessionLoopStopData = {
+  body?: {
+    loopID?: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/loop/stop"
+}
+
+export type SessionLoopStopErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionLoopStopError = SessionLoopStopErrors[keyof SessionLoopStopErrors]
+
+export type SessionLoopStopResponses = {
+  /**
+   * Stopped loops
+   */
+  200: {
+    stopped: number
+  }
+}
+
+export type SessionLoopStopResponse = SessionLoopStopResponses[keyof SessionLoopStopResponses]
+
 export type PartDeleteData = {
   body?: never
   path: {

@@ -20,6 +20,7 @@ import { resolveModelInfo, resolveRunTuiConfig, resolveSessionInfo } from "./run
 import { createRuntimeLifecycle } from "./runtime.lifecycle"
 import { trace } from "./trace"
 import { cycleVariant, formatModelLabel, resolveSavedVariant, resolveVariant, saveVariant } from "./variant.shared"
+import { shortLoopID, type ParsedLoop } from "./loop"
 import type { LocalReplayAnchor, LocalReplayRow, RunInput, RunPrompt, RunProvider, StreamCommit } from "./types"
 
 /** @internal Exported for testing */
@@ -368,6 +369,61 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
     state.localRows = [...state.localRows, { commit, after }].slice(-LOCAL_REPLAY_ROW_LIMIT)
   }
 
+  // `/loop ...` is a thin client over the server-side loop engine: parse on the
+  // client (already done by the queue), then call the engine over the SDK. The
+  // server owns scheduling + lifecycle (incl. teardown on session delete/abort),
+  // so there are no client-side timers and no driving from turn events.
+  const handleLoop = async (action: ParsedLoop, notify: (text: string) => void): Promise<void> => {
+    if (!hasSession(input, state)) {
+      notify("no active session")
+      return
+    }
+
+    const sessionID = state.sessionID
+    if (action.type === "stop") {
+      const res = await ctx.sdk.session.loopStop({ sessionID }).catch(() => undefined)
+      if (res?.error || !res?.data) {
+        notify("failed to stop loops")
+        return
+      }
+      notify(`stopped ${res.data.stopped} loop(s)`)
+      return
+    }
+
+    if (action.type === "status") {
+      const res = await ctx.sdk.session.loopList({ sessionID }).catch(() => undefined)
+      if (res?.error || !res?.data) {
+        notify("failed to list loops")
+        return
+      }
+      const loops = res.data
+      if (loops.length === 0) {
+        notify("no active loops · usage: /loop [interval] <prompt | /command> · /loop stop")
+        return
+      }
+      for (const loop of loops) {
+        const cadence = loop.mode === "interval" && loop.interval ? `every ${loop.interval}` : "self-paced"
+        notify(`loop ${shortLoopID(loop.loopID)} (${cadence}): "${loop.prompt}"`)
+      }
+      return
+    }
+
+    if (action.type !== "start") {
+      // `error` is handled by the queue before dispatch; nothing to do here.
+      return
+    }
+
+    const res = await ctx.sdk.session
+      .loop({ sessionID, prompt: action.prompt, ...(action.interval ? { interval: action.interval } : {}) })
+      .catch(() => undefined)
+    if (res?.error || !res?.data) {
+      notify("failed to start loop")
+      return
+    }
+    const cadence = res.data.mode === "interval" && action.interval ? `every ${action.interval}` : "self-paced"
+    notify(`looping ${cadence} (loop ${shortLoopID(res.data.loopID)}): "${action.prompt}"`)
+  }
+
   const loadCatalog = async (): Promise<void> => {
     if (footer.isClosed) {
       return
@@ -546,6 +602,7 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
       footer,
       initialInput: input.initialInput,
       trace: log,
+      onLoop: handleLoop,
       onSend: (prompt) => {
         state.shown = true
         state.history.push(prompt)

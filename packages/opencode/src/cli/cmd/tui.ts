@@ -104,13 +104,29 @@ export const TuiThreadCommand = cmd({
       .option("agent", {
         type: "string",
         describe: "agent to use",
+      })
+      .option("dangerously-skip-permissions", {
+        type: "boolean",
+        describe: "auto-approve permissions that are not explicitly denied (dangerous!)",
+        default: false,
       }),
   handler: async (args) => {
     const unguard = win32InstallCtrlCGuard()
     try {
+      if (args["dangerously-skip-permissions"]) {
+        const existing = process.env["OPENCODE_PERMISSION"]
+        const base = existing ? (() => { try { return JSON.parse(existing) } catch { return {} } })() : {}
+        base["*"] = "allow"
+        process.env["OPENCODE_PERMISSION"] = JSON.stringify(base)
+      }
       const { TuiConfig } = await import("@/config/tui")
-      const sessionID = typeof args.session === "string" ? args.session : undefined
-      const sessionPicker = args.session === true
+      // A string-typed `-s` with requiresArg:false yields "" when passed without
+      // a value (yargs never gives `true` here); treat "" — or a defensive
+      // boolean true — as "open the session picker", and a non-empty string as a
+      // concrete session id to continue.
+      const rawSession = args.session as string | boolean | undefined
+      const sessionID = typeof rawSession === "string" && rawSession.length > 0 ? rawSession : undefined
+      const sessionPicker = rawSession === "" || rawSession === true
       if (args.fork && !args.continue && !args.session) {
         UI.error("--fork requires --continue or --session")
         process.exitCode = 1

@@ -9,6 +9,7 @@ import { Session } from "@/session/session"
 import { SessionCompaction } from "@/session/compaction"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
+import { SessionLoop } from "@/session/loop"
 import { SessionRevert } from "@/session/revert"
 import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
@@ -27,6 +28,8 @@ import {
   ForkPayload,
   InitPayload,
   ListQuery,
+  LoopPayload,
+  LoopStopPayload,
   MessagesQuery,
   PermissionResponsePayload,
   PromptPayload,
@@ -49,6 +52,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const session = yield* Session.Service
     const shareSvc = yield* SessionShare.Service
     const promptSvc = yield* SessionPrompt.Service
+    const loopSvc = yield* SessionLoop.Service
     const revertSvc = yield* SessionRevert.Service
     const compactSvc = yield* SessionCompaction.Service
     const runState = yield* SessionRunState.Service
@@ -375,6 +379,32 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return true
     })
 
+    const loop = Effect.fn("SessionHttpApi.loop")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof LoopPayload.Type
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* loopSvc.start({
+        parentSessionID: ctx.params.sessionID,
+        prompt: ctx.payload.prompt,
+        interval: ctx.payload.interval,
+        agent: ctx.payload.agent,
+      })
+    })
+
+    const loopStop = Effect.fn("SessionHttpApi.loopStop")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof LoopStopPayload.Type
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* loopSvc.stop({ parentSessionID: ctx.params.sessionID, loopID: ctx.payload.loopID })
+    })
+
+    const loopList = Effect.fn("SessionHttpApi.loopList")(function* (ctx: { params: { sessionID: SessionID } }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* loopSvc.list({ parentSessionID: ctx.params.sessionID })
+    })
+
     const deleteMessage = Effect.fn("SessionHttpApi.deleteMessage")(function* (ctx: {
       params: { sessionID: SessionID; messageID: MessageID }
     }) {
@@ -433,6 +463,9 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("revert", revert)
       .handle("unrevert", unrevert)
       .handle("permissionRespond", permissionRespond)
+      .handle("loop", loop)
+      .handle("loopStop", loopStop)
+      .handle("loopList", loopList)
       .handle("deleteMessage", deleteMessage)
       .handle("deletePart", deletePart)
       .handle("updatePart", updatePart)
